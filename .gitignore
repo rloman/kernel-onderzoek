@@ -1,0 +1,10 @@
+target
+*.ko
+issues.txt
+.*.cmd
+*.o
+.tmp_versions
+Module.symvers
+*.mod.c
+*.order
+

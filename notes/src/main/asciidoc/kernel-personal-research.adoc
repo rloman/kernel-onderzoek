@@ -1,0 +1,436 @@
+= Kernel persoonlijk onderzoek Raymond Loman
+
+== Notes
+
+=== 2017-09-09
+Op mijn asus laptop onder vm linux kernel dev staat onder ~/kernel/linux-stable mijn kernel onderzoek locatie
+
+de includes van alle libs die in de kernel staan staat onder include(/linux)?
+
+In deze dir staat de locatie voor de x86_64  arch type
+zie plaatje: Screenshot from 2017-09-09 10:09:50 op mijn host os want copy paste werkt niet van host naar quest (althans nu niet)
+
+== Building the kernel (page 13)
+$ make config 
+	Maakt config based on architecture en schrijft naar .config
+
+$ make oldconfig
+	Maakt copy van .config to .config.old
+
+Daarna doe je iets als
+
+$ make
+
+of als je minder noise wilt
+
+$ make > /dev/null zodat alleen syserr nog naar console gaat
+
+of 
+$ make > ../output.log zodat alles in output.log komt. 
+
+Hier gedaan:
+$ make
+
+en zie screenshot:
+ wat werkt
+Screenshot from 2017-09-09 10:42:17
+
+Het werk! althans de build van de kernel werkte.
+En je ziet ook in dit screenshot dat de static kernel eerst is gebouwd en daarna de modules (phase 2) nice
+
+Blz. 16 van boek instllatie kun je zo mooi zien:
+$ make install (gaat gelukkig fout van ik ben nu nog geen root maar je ziet wat hij wilt)
+
+$ make modules_install (gaat gelukkig ook nu nog fout)
+
+
+Verder ... ik gebruik kennelijk grub want ik heb /boot/grub/grub.conf
+
+Nu moet ik even uitzoeken hoe grub werkt.
+Zie ook screenshots rondom 2017-09-09T11:00 want hierin heb ik wat screenshots gemaakt
+je kunt namelijk grub laten vragen welke kernel je wilt starten en dan moet je dit doen
+
+
+gksudo gedit /etc/default/grub
+change GRUB_TIMEOUT to -1 and comment out GRUB_HIDDEN_TIMEOUT
+
+finish off by running
+
+sudo update-grub
+
+En zelfs dat werkt dikke prima.
+
+dan is de volgende stap nu nadat het werkt ...
+1. ik heb geen fullscreen meer. proberen vbox additions te installeren?
+		Of ... wellicht nog beter eerst proberen de .config van de vorige kernel in de nieuwe kernel te krijgen??? zie boek blz. 13
+	Maar ... de waarheid in dit geval is nog simpeler. Ik moest niet meer doen dan de nieuwe kernel starten (v4.13.0) en dan
+	moest ik onder Linux / Settings / Display de resolutie gewoon zetten op 1920x1080 (full HD)
+
+2. Daarna zie verder papieren in het boek van Robert Love wat ik nu ga doen dus
+
+=== 2017-09-11
+
+Er wordt gedurende de build ook een System.map file aangemaakt. Die bevat de zg. symbol lookup table. Die mapt kernel symbols naar hun start address.
+
+Het gebruik van de standaard C string doe je door include van <linux/string.h> die staat trouwens in 
+kernel-location/include/linux/string.h
+
+De verzameling van architectuur afhankelijke header files zit in:
+arch/<architecture>/include/asm
+(asm staat hier voor assembly?)
+Eh ... ja klopt, dit staat voor assembly want oorspronkelijk stond hier alleen / vooral Assembly maar dat is nu niet meer zo. Zie url: https://stackoverflow.com/questions/13718563/what-is-asm-stand-for-in-linux-include-asm
+
+en screenshot 2017-09-11T09:30 
+
+
+
+Bijvoorbeeld, als we de kernel compileren voor de x86 architectuur dan zitten de header files in:
+arch/x86/include/asm
+NB: source files includes deze headers via alleen maar de asm prefix dus voorbeeld;
+<asm/ioctl.h> die dan dus moet staan onder arch/x86/include/asm/ioctl.h
+En dat klopt (althans klopte) want sinds 2012 staat er een uapi directory tussen (dus tussen asm en ioctl.h) want
+dat is omdat ze uapi (user space api) er tussen hebben geschoven om omderscheid te houden tussen kernel space en user space source code.
+zie url als je hier meer van wilt weten: https://lwn.net/Articles/507794/
+
+Mocht je overigens - en dat was ik op dit punt - geinteresseerd zijn in de Assembly dan kun je brute force zoeken met $ find . -name *.S in je linux source tree
+en een goed / leuk voorbeeld staat bijvoorbeeld hier: arch/x86/realmode/rm/reboot.S
+(die schrijft uit hoe je een reboot doet)
+
+Nu verder met blz. 19 lezen inline assembly.
+Het werken met inline assembly is best te doen. Je moet weten dat je een asm prefix voor je code hebt of een __asm__ (om eventuele naamgeving clashes tussen jouw asm en de asm C library call te voorkomen hebben ze ook een __asm__ versie)
+je start een standaard assembly in C met
+asm("assembly code");
+voorbeeld;
+asm("movl %ecx %eax"); /* moves the contents of ecx to eax */
+__asm__("movb %bh (%eax)"); /*moves the byte from bh to the memory pointed by eax */
+
+let wel: er wordt (volgens mij) gebruik gemaakt van de Gas (as) oftewel de AT&T Assembly syntax.
+deze url legt het wel lekker uit: http://www.ibiblio.org/gferg/ldp/GCC-Inline-Assembly-HOWTO.html
+
+(en deze url legt weer uit hoe Gas werkt: http://tldp.org/HOWTO/html_single/Assembly-HOWTO/#AEN261)
+
+Als je meerdere regels wilt / moet dan doe je iets als dit:
+ __asm__ ("movl %eax, %ebx\n\t"
+          "movl $56, %esi\n\t"
+          "movl %ecx, $label(%edx,%ebx,$4)\n\t"
+          "movb %ah, (%ebx)");
+
+Je neemt dan gewoon per regel een cr/lf en een tab extra en dat plaats je tussen quotes. werkt prima.
+
+Je kunt je voorstellen dat als je met deze assembly instructies de waarde van een registere veranderd dat er dan iets gaat gebeuren. Iets wat niet altijd ok is.
+gewoon omdat je de oorspronkelijke situatie hebt veranderd.
+
+Daarom is er Extended Asm ... ->
+
+Met Extended ASm hebben we deze syntax;
+ asm ( assembler template 
+           : output operands                  /* optional */
+           : input operands                   /* optional */
+           : list of clobbered registers      /* optional */
+           );
+
+Goed stuk uit bovenvermelde site die ik niet kan of wil samenvatten:
+The assembler template consists of assembly instructions. Each operand is described by an operand-constraint string followed by the C expression in parentheses. A colon separates the assembler template from the first output operand and another separates the last output operand from the first input, if any. Commas separate the operands within each group. The total number of operands is limited to ten or to the maximum number of operands in any instruction pattern in the machine description, whichever is greater.
+
+If there are no output operands but there are input operands, you must place two consecutive colons surrounding the place where the output operands would go.
+
+Example:
+
+         asm ("cld\n\t"
+             "rep\n\t"
+             "stosl"
+             : /* no output registers */
+             : "c" (count), "a" (fill_value), "D" (dest)
+             : "%ecx", "%edi" 
+             );
+Now, what does this code do? The above inline fills the fill_value count times to the location pointed to by the register edi. It also says to gcc that, the contents of registers eax and edi are no longer valid. Let us see one more example to make things more clearer.
+
+         
+        int a=10, b;
+        asm ("movl %1, %%eax; 
+              movl %%eax, %0;"
+             :"=r"(b)        /* output */
+             :"r"(a)         /* input */
+             :"%eax"         /* clobbered register */
+             );       
+Here what we did is we made the value of ’b’ equal to that of ’a’ using assembly instructions. Some points of interest are:
+
+"b" is the output operand, referred to by %0 and "a" is the input operand, referred to by %1.
+"r" is a constraint on the operands. We’ll see constraints in detail later. For the time being, "r" says to GCC to use any register for storing the operands. output operand constraint should have a constraint modifier "=". And this modifier says that it is the output operand and is write-only.
+There are two %’s prefixed to the register name. This helps GCC to distinguish between the operands and registers. operands have a single % as prefix.
+The clobbered register %eax after the third colon tells GCC that the value of %eax is to be modified inside "asm", so GCC won’t use this register to store any other value.
+When the execution of "asm" is complete, "b" will reflect the updated value, as it is specified as an output operand. In other words, the change made to "b" inside "asm" is supposed to be reflected outside the "asm".
+
+Now we may look each field in detail.
+
+Heb nu gelezen op die site hierboven tot (nogmaals: tot!) chapter 6 omtrent More about constraints. Dit hoofdstuk (5) nogmaals doornemen en doen.\
+Wat je vooral moet weten is dus dat asm assembly is
+dat volatile is vluchtig en dat wil zeggen dat de compiler geen optimalisatie gaat doen op je asm volatile plekken
+
+Hieronder een voorbeeldje die toon hoe je (in mijn eigen Code::Blocks ide) een echt C programma draait met assembly er in:
+
+
+[source, c]
+----
+// some demo code to have assembly with C in ... #nice
+
+int main()
+{
+
+        // having two local variables with filled values
+        int foo = 10, bar = 15;
+        int result;
+
+        // using some assembly instruction
+        // in this case: addl %edx, %eax expressed with double %% since ...
+        // single % is operand  / value
+        // double % is a register. (this is GCC and not perse AT&T or Intel syntax)
+
+        // so start with asm volatile
+
+        // then the addl operation
+        // using the %ebx and %eax values to be added and saved to %eax
+        // in this case a (foo) is written to a
+        // in this case (b) is written to b
+        // both are added and the result of the summation is written to the output register which is a (foo) here.
+        asm volatile("addl  %%ebx,%%eax"
+                             :"=a"(result)
+                             :"a"(foo), "b"(bar)
+                             );
+
+        // print the result (default C)
+        printf("foo+bar=%d\n", result);
+
+        return 0;
+}
+----
+
+Deze url (waarnaar verwezen wordt in het bovenvermelde GCC inline assembly document) is ook leuk om te lezen: http://www.delorie.com/djgpp/doc/brennan/brennan_att_inline_djgpp.html
+
+In boek staat op blz. 19 iets over rdtsc. Op deze url vind je daar meer over: https://www.aldeid.com/wiki/X86-assembly/Instructions/rdtsc
+
+
+Ik ga nu ver met Hoofdstuk 3. Process Management
+
+Ben nu verder gegaan op blz. 24 van het boek en heb inderdaad <linux/sched.h> gevonden in pad: include/linux (natuurlijk) op regel 519 (vijfhonderdnegentien) begint ie
+(of anders zoeken met vim (/) op struct task_struct (2 keer zoeken vanwege commentaar)
+Interessant om lekker rustig door te lezen.
+
+dan ... 
+ook vind je inderdaad... op diverse plekken struct thread_info bijvoorbeeld onder asm maar daar ga ik straks verder mee.
+
+
+Je ziet dan inderdaad in het boek een goed plaatje over thread info
+
+Was beetje aan het zoeken naar *current* en zo en  heb gevonden dat het hier zit:
+It's a pointer to the current process (i.e. the process that issued the system call).
+
+On x86, it's defined in arch/x86/include/current.h (similar files for other archs).
+
+see ook deze url:
+https://stackoverflow.com/questions/12434651/what-is-the-current-in-linux-kernel-source
+
+je vindt uiteindelijke de current die een #define is van get_current in <asm-generic/current.h>
+
+en die wordt dan weer gebruikt in pad: linux-stable/arch/x86/include/asm/current.h
+
+zo, nu even pauze :-) wat een gezoek naar current.
+
+Nu verder op blz. 31
+=== Process Creation
+
+je hebt inderdaad onder linux-stable/kernel/fork.c code en daarin zit de enorm belangrijke do_fork(...) methode
+Op blz. 32 van het boek van Robert Love staat het eigenlijk prima en redelijk samenvattend uitgeschreven.
+
+Op regel 1523 (vijftienhonderddrieentwintig) staat de code voor copy_process waarin in het boek hierboven naar wordt verwezen.
+
+die op zijn beurt weer dup_task_struct(...) aanroep op regel 504 (vijfhonderdenvier) van fork.c
+en die op zijn beurt weer alloc_task_struct_node aanroept op regel 513 (vijfhonderddertien) en de code van alloc_task_struct staat op regel: 152 een task_struct retturned
+via een system call (kernel) (en daar houdt het voor nu dan voor mij even op)
+
+samenvattend: onthoud file linux-stable/kernel/fork.c
+
+
+Je kunt nu verder gaan op blz. 32 van het boek van Robert Love en eigenlijk kan ik sowieso nog eeen keer terugkomen op het forking gebeuren.
+
+
+En later een keer dit filmpje kijken (bij system calls)
+https://www.youtube.com/watch?v=Zrf7bohYqRY
+
+Heb zo ineens zin om me wat meer - ook praktisch - te verdiepen in het maken van een Linux Kernel Module
+Own this: http://www.tldp.org/LDP/lkmpg/2.6/html/lkmpg.html#AEN38
+
+Welke modules zijn al geladen?
+$ lsmod
+die overigens /prod/modules uitleest
+
+detail is dat ik nu onder mijn VirtualBox Linux kernel hacking omgeving GEEN modules heb en op mijn productie-omgeving 113 (honderdertien)
+
+Er is dus een kmod en dat is de Kernel Module Daemon
+Kijk naar /etc/modprobe.conf (of anders want ik zie dat Ubuntu Mint dit anders doet)
+Als ik een module msdos wil laden dan doe ik dat bijvoorbeeld met
+$ modprobe msdos
+
+Kan ook met insmod commando's maar das meer werk. Nogmaals dit is uit de bovenvermelde url allemaal.
+
+Heb de manual uit de url hierboven gevolgd tot (dus tot)  2.3 Hello world (part 2) en alles werkt.
+Onder ~/kernel/modules/hello-world staat het voorbeeld.
+De enige fouten dingen in de manual zijn 
+- dat je niet clean en all targets uit de Makefile kunt verwijderen. Dan werkt het simpelweg niet meer. Dat verbaasde me tijdens lezen al.
+- dat er geen /var/log/messages maar een /var/log/kern.log is in Ubuntu linux / mint
+
+Dus straks (later) verder met $ 2.3 (zie url boven)
+
+Dan heb je binnen no time dus hello-2.o gemaakt en geinstalleerd met $ insmod hello-2.ko
+
+Dan wordt er melding gemaakt van de linux/drivers/char/Makefile; die staat bij mij op ~/kernel/linux-stable/drivers/char/Makefile
+Als je kijkt in die Makefile dan staat er op bepaalde plekken obj-y die worden hard gewired in de kernel.
+Dingen met obj-$(CONFIG_FOO) (FOO staat hier voor van alles en nog wat) worden geplukt uit de .config file bij het maken van de kernel.
+
+Je ziet ook dat je vanaf de 2.6 kernel niet perse meer init_module of cleanup_module hebt maar daar zelf een naam aan kunt geven.
+Zie hieronder code van hello-2.c die dit laat zien.
+
+[source, c]
+----
+/*  
+ *  hello-2.c - Demonstrating the module_init() and module_exit() macros.
+ *  This is preferred over using init_module() and cleanup_module().
+ */
+#include <linux/module.h>	/* Needed by all modules */
+#include <linux/kernel.h>	/* Needed for KERN_INFO */
+#include <linux/init.h>		/* Needed for the macros */
+
+static int __init hello_2_init(void)
+{
+	printk(KERN_INFO "Hello, world 2\n");
+	return 0;
+}
+
+static void __exit hello_2_exit(void)
+{
+	printk(KERN_INFO "Goodbye, world 2\n");
+}
+
+module_init(hello_2_init);
+module_exit(hello_2_exit);
+
+----
+
+Voor nu onthouden dat __init en __exit resp. init en exit registratie mogelijk maken voor de methodes die dit doen.
+
+Daarna heb ik aan de hand van die url hierboven de hello-3, -4 en 5 geimplementeerd en gedraaid. Ziet er leuk uit.
+Heb daar ook commentaar in gezet voorlater.
+
+de sourcecode hier nog neerzetten. die staats overigens in
+~/kernel/modules/hello-world/...
+
+zie ook Makefile
+
+== Multiple files modules
+Ook interessant. Gedaan. Werkt. startstop. 
+
+== Preliminaries
+
+=== Modules vs Programs
+
+Bij mij bekend dat modules niet zomaar van alles kunnen doen. e.g. prinf werkt niet want stdio is niet included
+
+Wat wordt er wel door de kernel ge-exporteert?
+[source, c]
+----
+	/proc/kallsyms
+----
+
+Wordt dan een hele lijst
+$ 3.1.2 geeft een leuke tip om te zien welke systemcalls worden uitgevoerd door jouw .c programma
+
+Samenvattend: strace is een handig hulpmiddel om te zien welke systemcalls tijdens de uitvoering van een programma allemaal worden uitgevoerd.
+
+Eigenlijk toont het strace commando jou het " face behind the mask " van wat er allemaal achter de schermen gebeurt.
+
+.Wist jou trouwens dat: 
+[source, shell]
+----
+$ man 2 write 
+----
+de manual geeft van de Linux Programmers manual ipv de Linux commando???
+
+en $ man 3 write geeft iets uit section 3 weer en dat lijkt iets van libraries te zijn ???
+
+== Code space
+In deze paragraaf van de url wordt geschreven over micro-kernel operating systems like
+* GNU Hurd
+* QNX Neutrino
+
+== 3.1.6 Device drivers
+
+Handig is het om het volgende te doen (let op de range) om een bepaald type device drivers te zien. let op: je moet per digit een range maken
+[source, shell]
+----
+$ ls -ltr /dev/sda[1-3] 
+----
+
+bij mij zie je een tweetal getallen gescheiden door een komma. Dat is het major en minor number.
+major:= het number bepaald de driver die de hardware bestuurd (hier dus twee keer een 8 want het betreft immers dezelfde device driver)
+minor:= het number die het unieke number van het device aangeeft.
+
+b is block device  (harde schijven etc. die per block (meestal 1024 byte) aan worden gestuurd.
+c aan het begin is character device (bekend van de HIO natuurlijk)
+
+als je een voorbeeld wilt zien van een character device doe je
+[source, shell]
+----
+$ ls -ltr /dev/tty[1-3]
+----
+
+
+
+
+in usr/src/linux/Documentation/devices.txt zie je de ge alloceerde major numbers
+feitelijk is het gehele hoofdstuk onder bovenvermelde url wel erg interessant ja.
+
+het maken van een device file is enorm simpel.
+[source, shell]
+----
+$ mknod /dev/raymie c 12 2
+----
+maakt een character device file aan met filename /dev/raymie met major 12 en minor 2 (in Linux jargon: character major twelve)
+
+
+=== 4.1 Chacter device drivers
+
+Gewoon dat stuk lezen of hier copieren. Te doen sinds ik het op de HIO heb gedaan.
+
+== The /proc file system
+
+Tonen van geheugen:= /proc/meminfo
+
+
+
+
+Ben nu aan het lezen op  boek van Robert Love op blz. 37 en ben kernel/exit.c aan het doornemen in de methode do_exit(...)
+
+Intermezzo:
+Dit is een handig commando
+
+[source, shell]
+----
+inxi -Fxz # levert allerhande informatie in shell van je systeem op
+----
+
+== System calls
+Wellicht moet dit later ergens anders.
+Zie deze url voor een lekker prachtige en praktische ervaring:
+https://tssurya.wordpress.com/2014/08/19/adding-a-hello-world-system-call-to-linux-kernel-3-16-0/
+
+en deze file staat nu ook in inbox: nu is: 2017-09-21T11:49:00+02:00
+
+== Iets over CPU's
+Intel
+De I3, I5 en de I7 processoren zijn de opvolgers van de quadcore generatie. 
+Deze zijn nu al toe aan de 4e generatie. Een Pentium processor is langzamer dan een !3 processor. De I3 verdeelt zijn kracht over 4 cores (quadcore) terwijl de pentium dat over 2 cores moet verdelen.
+
+I3 wordt voornamelijk gebruikt voor office en internet
+I5 wordt gebruikt voor zwaardere applicaties en gemiddelde games (ligt ook aan de de videokaart en intern geheugen). 
+I7 wordt echt gebruikt voor zware games en videobewerking op hoger niveau.
+
