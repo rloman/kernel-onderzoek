@@ -401,6 +401,14 @@ maakt een character device file aan met filename /dev/raymie met major 12 en min
 
 Gewoon dat stuk lezen of hier copieren. Te doen sinds ik het op de HIO heb gedaan.
 
+Je ziet een voorbeeld in modules/chardev
+
+Let op: werkt prima maar je moet wel een chardev file maken waar je naar kunt schrijven (om de falende write te zien) via
+$ chmod 766 /dev/chardev
+
+en als je dan schrijft (wat eigenlijk niet kan maar hij roept wel de registreerde write functie aan) dan zie je de data op de syslog
+en een melding van bash die totaal anders is dan de kernel log
+
 == The /proc file system
 
 Tonen van geheugen:= /proc/meminfo
