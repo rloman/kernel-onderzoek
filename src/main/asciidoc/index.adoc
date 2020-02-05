@@ -7,7 +7,7 @@
 :linkattrs:
 
 
-= Kernel resarch
+= Kernel research
 {docDate}
 
 
